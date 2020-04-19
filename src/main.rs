@@ -105,23 +105,80 @@ fn setup() -> (
     (red_led, tc5, array)
 }
 
+fn count_neighbors(state: &[[u8; 16]; 8], row: usize, col: usize) -> u8 {
+    let mut total = 0;
+    for r in row.saturating_sub(1)..=core::cmp::min(7, row+1) {
+        for c in col.saturating_sub(1)..=core::cmp::min(15, col+1) {
+            if r == row && c == col {
+                continue;
+            }
+            total += state[r][c] & 1;
+        }
+    }
+    total
+}
+
+fn step_state(state: &mut [[u8; 16]; 8]) {
+    // we can't allocate, so use the second lowest bit to signify what will
+    // happen in the next iteration
+    for row in 0..8 {
+        for col in 0..16 {
+            let neighbors = count_neighbors(&state, row, col);
+            if state[row][col] & 1 == 0 && neighbors == 3 {
+                // we are dead and have 3 live neighbors
+                state[row][col] |= 0b10;
+            } else if state[row][col] & 1 == 1 && (neighbors == 2 || neighbors == 3) {
+                // we are alive and have 2 or 3 live neighbors
+                state[row][col] |= 0b10;
+            } else {
+                // we should die
+                // the next bit is already 0
+            }
+        }
+    }
+
+    // shift all the bits down one
+    for row in 0..8 {
+        for col in 0..16 {
+            state[row][col] = state[row][col] >> 1;
+        }
+    }
+}
+
+fn show_state(state: &[[u8; 16]; 8], image: &mut [[u8; 16]; 8]) {
+    for row in 0..8 {
+        for col in 0..16 {
+            image[row][col] = if state[row][col] == 1 {15} else {0};
+        }
+    }
+}
+
 #[entry]
 fn main() -> ! {
     let (mut red_led, mut _timer, mut array) = setup();
 
-    array.array = [
-        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    let mut state = [
+        [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     ];
+
+    let frame_duration = 20;
+    let mut frame_timeout = 0;
 
     let base_scan_freq = DelayHertz(1000);
     loop {
+        if frame_timeout == 0 {
+            show_state(&state, &mut array.array);
+            step_state(&mut state);
+            frame_timeout = frame_duration;
+        }
+        frame_timeout -= 1;
         array.scan(base_scan_freq).unwrap_or(());
         red_led.toggle();
     }

@@ -23,7 +23,7 @@ rev = "ba8fef7"
 # this lets you use `cargo fix`!
 [[bin]]
 name = "led-matrix-life"
-test = false
+# test = false
 bench = false
 
 [profile.release]
