@@ -13,6 +13,7 @@ use hal::pac::Peripherals;
 use hal::prelude::*;
 use hal::sercom::{SPIMaster4, Sercom4Pad0, Sercom4Pad2, Sercom4Pad3};
 use hal::timer::TimerCounter;
+use nb::block;
 
 use matrix_display::*;
 
@@ -105,7 +106,7 @@ fn setup() -> (
     (red_led, tc5, array)
 }
 
-fn count_neighbors(state: &[[u8; 16]; 8], row: usize, col: usize) -> u8 {
+fn count_neighbors_bounded(state: &[[u8; 16]; 8], row: usize, col: usize) -> u8 {
     let mut total = 0;
     for r in row.saturating_sub(1)..=core::cmp::min(7, row+1) {
         for c in col.saturating_sub(1)..=core::cmp::min(15, col+1) {
@@ -118,12 +119,28 @@ fn count_neighbors(state: &[[u8; 16]; 8], row: usize, col: usize) -> u8 {
     total
 }
 
+fn count_neighbors_torus(state: &[[u8; 16]; 8], row: usize, col: usize) -> u8 {
+    let mut total = 0;
+    for roff in 7..=9 {
+        for coff in 15..=17 {
+            if roff == 8 && coff == 16 {
+                continue;
+            }
+
+            let r = (row + roff) % 8;
+            let c = (col + coff) % 16;
+            total += state[r][c] & 1;
+        }
+    }
+    total
+}
+
 fn step_state(state: &mut [[u8; 16]; 8]) {
     // we can't allocate, so use the second lowest bit to signify what will
     // happen in the next iteration
     for row in 0..8 {
         for col in 0..16 {
-            let neighbors = count_neighbors(&state, row, col);
+            let neighbors = count_neighbors_torus(&state, row, col);
             if state[row][col] & 1 == 0 && neighbors == 3 {
                 // we are dead and have 3 live neighbors
                 state[row][col] |= 0b10;
@@ -158,20 +175,23 @@ fn main() -> ! {
     let (mut red_led, mut _timer, mut array) = setup();
 
     let mut state = [
-        [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1],
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+        [0, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     ];
 
-    let frame_duration = 20;
-    let mut frame_timeout = 0;
-
     let base_scan_freq = DelayHertz(1000);
+
+    show_state(&state, &mut array.array);
+
+    let frame_duration = 8;
+    let mut frame_timeout = 100;
+
     loop {
         if frame_timeout == 0 {
             show_state(&state, &mut array.array);
